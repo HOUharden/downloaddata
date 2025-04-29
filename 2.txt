@@ -1,0 +1,1119 @@
+<template>
+    <div class="detail-browse-container">
+      <!-- 页面标题部分 -->
+      <div class="page-header">
+        <div class="header-title">
+          <h2>采样数据浏览</h2>
+          <el-tag effect="dark" type="info" v-if="englishTitle">{{ englishTitle }}</el-tag>
+        </div>
+        <!-- 添加新样品按钮 -->
+        <el-button type="primary" icon="el-icon-plus" @click="showAddDialog">添加新样品</el-button>
+      </div>
+  
+      <!-- 筛选工具栏，当有数据时才显示 -->
+      <div class="filter-toolbar" v-if="sampleInfoData.length > 0">
+        <!-- 国家筛选下拉框 -->
+        <el-select v-model="selectedCountryFilter" placeholder="国家" clearable @change="onCountryFilterChange" class="filter-item">
+          <el-option v-for="c in uniqueCountry" :key="c" :label="c" :value="c"/>
+        </el-select>
+  
+        <!-- 采样地点筛选下拉框 -->
+        <el-select v-model="selectedlocationDetailFilter" placeholder="采样地点" clearable @change="onlocationDetailFilterChange" class="filter-item">
+          <el-option v-for="loc in uniquelocationDetail" :key="loc" :label="loc" :value="loc"/>
+        </el-select>
+  
+        <!-- 藻毒素类型筛选下拉框 -->
+        <el-select v-model="selectedToxinTypeFilter" placeholder="按藻毒素类型筛选" clearable @change="onToxinFilterChange" class="filter-item">
+          <el-option v-for="type in uniqueToxinTypes" :key="type" :label="type" :value="type"/>
+        </el-select>
+  
+        <!-- 日期范围选择器 -->
+        <el-date-picker v-model="dateRangeFilter" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" @change="onDateRangeChange" format="YYYY-MM-DD" value-format="YYYY-MM-DD" class="filter-item"/>
+      </div>
+  
+      <div class="content-wrapper">
+        <!-- 加载中动画 -->
+        <transition name="fade">
+          <div v-if="loading" class="loading-overlay">
+            <el-skeleton :rows="10" animated />
+          </div>
+        </transition>
+  
+        <!-- 数据表格，当有数据且不在加载状态时显示 -->
+        <el-card v-show="!loading && sampleInfoData.length > 0" class="table-card">
+          <el-table :data="paginatedData" style="width: 100%" border highlight-current-row stripe :header-cell-style="{ background: '#f5f7fa', color: '#606266' }">
+            <!-- 采样地点名称列 -->
+            <el-table-column prop="sampleLocation" label="采样地点名称" width="150" show-overflow-tooltip />
+            
+            <!-- 采样时间列，使用自定义格式化 -->
+            <el-table-column prop="samplingDate" label="采样时间" width="120">
+              <template #default="scope">
+                <span class="date-column">{{ formatDate(scope.row.samplingDate) }}</span>
+              </template>
+            </el-table-column>
+            
+            <!-- 样品种类列，使用标签显示 -->
+            <el-table-column label="样品种类" width="120">
+              <template #default="scope">
+                <el-tag :type="scope.row.sampleCategory === 1 ? 'success' : 'warning'" effect="light" size="small">
+                  {{ scope.row.sampleCategory === 1 ? '水样' : scope.row.sampleCategory === 2 ? '底泥' : scope.row.otherType || '其他' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            
+            <!-- 水体属性列 -->
+            <el-table-column label="水体属性" width="120">
+              <template #default="scope">
+                <el-tag :type="scope.row.waterType === 1 ? 'primary' : 'info'" effect="plain" size="small">
+                  {{ scope.row.waterType === 1 ? '淡水' : '海水' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            
+            <!-- 具体水体类型列 -->
+            <el-table-column label="具体水体类型" width="120">
+              <template #default="scope">
+                <div class="water-type">
+                  <i class="el-icon-location-information"></i>
+                  <span v-if="scope.row.waterType === 1">
+                    {{ scope.row.freshwaterSubtype === 1 ? '湖泊' : scope.row.freshwaterSubtype === 2 ? '池塘' : scope.row.freshwaterSubtype === 3 ? '河流/河口' : scope.row.freshwaterSubtype === 4 ? '水库' : scope.row.freshwaterSubtype === 5 ? '地表水' : '地下水' }}
+                  </span>
+                  <span v-else>
+                    {{ scope.row.seawaterSubtype === 1 ? '海水/海湾/海洋' : scope.row.seawaterSubtype === 2 ? '近海/海岸/海滩' : '潮汐' }}
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            
+            <!-- 藻毒素信息列 -->
+            <el-table-column label="藻毒素信息" width="250">
+              <template #default="scope">
+                <div class="toxin-info">
+                  <div class="toxin-type">
+                    <strong>藻毒素种类：</strong>
+                    <el-button type="primary" size="small" :plain="selectedToxinTypeFilter !== scope.row.toxinType" @click="onToxinFilterChange(scope.row.toxinType)">
+                      {{ scope.row.toxinType || '未记录' }}
+                    </el-button>
+                  </div>
+                  <div class="toxin-details">
+                    <div class="toxin-concentration">
+                      <strong>含量：</strong>
+                      <span class="concentration-value">{{ scope.row.concentration || 0 }} ug/L</span>
+                    </div>
+                    <div class="toxin-method">
+                      <strong>检测方法：</strong>{{ scope.row.detectionMethod || '未记录' }}
+                    </div>
+                    <div v-if="scope.row.otherEvalStandard" class="toxin-standard">
+                      <strong>评估标准：</strong>{{ scope.row.otherEvalStandard }}
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            
+            <!-- 地理位置列 -->
+            <el-table-column label="地理位置" width="300">
+              <template #default="scope">
+                <div class="location-info">
+                  <div class="coordinate">
+                    <el-tag type="primary" effect="dark" size="small">
+                      <i class="el-icon-map-location"></i> 坐标
+                    </el-tag>
+                    <span class="coordinate-value">{{ scope.row.latitude }}, {{ scope.row.longitude }}</span>
+                  </div>
+                  <div class="administrative">
+                    <el-descriptions :column="1" size="small" border>
+                      <el-descriptions-item v-if="scope.row.continent" label="大洲">{{ scope.row.continent }}</el-descriptions-item>
+                      <el-descriptions-item v-if="scope.row.country" label="国家">{{ scope.row.country }} <span v-if="scope.row.countryCode" class="country-code">({{ scope.row.countryCode }})</span></el-descriptions-item>
+                      <el-descriptions-item v-if="scope.row.province" label="省份">{{ scope.row.province }}</el-descriptions-item>
+                      <el-descriptions-item v-if="scope.row.city" label="城市">{{ scope.row.city }}</el-descriptions-item>
+                      <el-descriptions-item v-if="scope.row.county" label="区县">{{ scope.row.county }}</el-descriptions-item>
+                    </el-descriptions>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            
+            <!-- 操作列 -->
+            <el-table-column label="操作" width="150" fixed="right" class-name="operation-column">
+            <template #default="scope">
+                <div class="action-buttons">
+                <el-button type="primary" size="small" @click="handleEdit(scope.row)" icon="el-icon-edit">编辑</el-button>
+                <el-button type="danger" size="small" @click="handleDelete(scope.row)" icon="el-icon-delete">删除</el-button>
+                </div>
+            </template>
+            </el-table-column>
+          </el-table>
+  
+          <!-- 分页控件 -->
+          <div class="pagination-container" v-if="filteredData.length > 0">
+            <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="filteredData.length" :page-size="pageSize" :page-sizes="[5, 10, 20, 50]" :current-page="currentPage" @size-change="handleSizeChange" @current-change="handleCurrentChange"/>
+          </div>
+        </el-card>
+  
+        <!-- 无数据提示 -->
+        <div v-if="!loading && sampleInfoData.length === 0" class="no-data">
+          <el-empty description="暂无采样数据">
+            <template #image>
+              <img src="https://cdn.jsdelivr.net/npm/element-plus/lib/theme-chalk/img/empty.svg" alt="No Data" />
+            </template>
+            <el-button type="primary" @click="showAddDialog">添加新样品</el-button>
+            <el-button @click="router.push('/browse')">返回浏览页面</el-button>
+          </el-empty>
+        </div>
+      </div>
+  
+      <!-- 添加/编辑样品对话框 -->
+      <el-dialog 
+        :title="dialogType === 'add' ? '添加新样品' : '编辑样品'"
+        v-model="dialogVisible"
+        width="70%"
+        :close-on-click-modal="false"
+        :destroy-on-close="true">
+        <el-form :model="formData" :rules="formRules" ref="sampleForm" label-width="120px" class="sample-form">
+          <!-- 基本信息部分 -->
+          <el-divider content-position="left">基本信息</el-divider>
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="采样地点" prop="sampleLocation">
+                <el-input v-model="formData.sampleLocation" placeholder="请输入采样地点名称"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="采样时间" prop="samplingDate">
+                <el-date-picker v-model="formData.samplingDate" type="date" placeholder="选择日期" style="width: 100%;" value-format="YYYY-MM-DD"></el-date-picker>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="样品种类" prop="sampleCategory">
+                <el-radio-group v-model="formData.sampleCategory">
+                  <el-radio :label="1">水样</el-radio>
+                  <el-radio :label="2">底泥</el-radio>
+                  <el-radio :label="3">其他</el-radio>
+                </el-radio-group>
+                <el-input v-if="formData.sampleCategory === 3" v-model="formData.otherType" placeholder="请输入其他类型" style="margin-top: 10px;"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="水体属性" prop="waterType">
+                <el-radio-group v-model="formData.waterType">
+                  <el-radio :label="1">淡水</el-radio>
+                  <el-radio :label="2">海水</el-radio>
+                </el-radio-group>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          
+          <el-row :gutter="20">
+            <el-col :span="24">
+              <el-form-item label="具体水体类型" prop="waterSubtype">
+                <template v-if="formData.waterType === 1">
+                  <el-select v-model="formData.freshwaterSubtype" placeholder="选择淡水类型" style="width: 100%;">
+                    <el-option :label="'湖泊'" :value="1"></el-option>
+                    <el-option :label="'池塘'" :value="2"></el-option>
+                    <el-option :label="'河流/河口'" :value="3"></el-option>
+                    <el-option :label="'水库'" :value="4"></el-option>
+                    <el-option :label="'地表水'" :value="5"></el-option>
+                    <el-option :label="'地下水'" :value="6"></el-option>
+                  </el-select>
+                </template>
+                <template v-else-if="formData.waterType === 2">
+                  <el-select v-model="formData.seawaterSubtype" placeholder="选择海水类型" style="width: 100%;">
+                    <el-option :label="'海水/海湾/海洋'" :value="1"></el-option>
+                    <el-option :label="'近海/海岸/海滩'" :value="2"></el-option>
+                    <el-option :label="'潮汐'" :value="3"></el-option>
+                  </el-select>
+                </template>
+              </el-form-item>
+            </el-col>
+          </el-row>
+  
+          <!-- 藻毒素信息部分 -->
+          <el-divider content-position="left">藻毒素信息</el-divider>
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="藻毒素种类" prop="toxinType">
+                <el-input v-model="formData.toxinType" placeholder="请输入藻毒素种类"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="含量 (ug/L)" prop="concentration">
+                <el-input-number v-model="formData.concentration" :min="0" :precision="2" :step="0.1" style="width: 100%;"></el-input-number>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="检测方法" prop="detectionMethod">
+                <el-input v-model="formData.detectionMethod" placeholder="请输入检测方法"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="是否有评估标准">
+                <el-switch v-model="formData.hasOtherToxinEval"></el-switch>
+                <el-input 
+                  v-if="formData.hasOtherToxinEval" 
+                  v-model="formData.otherEvalStandard" 
+                  placeholder="请输入评估标准"
+                  style="margin-top: 10px;"></el-input>
+              </el-form-item>
+            </el-col>
+          </el-row>
+  
+          <!-- 地理位置信息部分 -->
+          <el-divider content-position="left">地理位置信息</el-divider>
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="纬度" prop="latitude">
+                <el-input-number v-model="formData.latitude" :min="-90" :max="90" :precision="6" :step="0.000001" style="width: 100%;"></el-input-number>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="经度" prop="longitude">
+                <el-input-number v-model="formData.longitude" :min="-180" :max="180" :precision="6" :step="0.000001" style="width: 100%;"></el-input-number>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          
+          <el-row :gutter="20">
+            <el-col :span="8">
+              <el-form-item label="大洲">
+                <el-input v-model="formData.continent" placeholder="请输入大洲"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="国家" prop="country">
+                <el-input v-model="formData.country" placeholder="请输入国家"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="国家代码">
+                <el-input v-model="formData.countryCode" placeholder="请输入国家代码"></el-input>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          
+          <el-row :gutter="20">
+            <el-col :span="8">
+              <el-form-item label="省份">
+                <el-input v-model="formData.province" placeholder="请输入省份"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="城市">
+                <el-input v-model="formData.city" placeholder="请输入城市"></el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="区县">
+                <el-input v-model="formData.county" placeholder="请输入区县"></el-input>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+        <template #footer>
+          <span>
+            <el-button @click="dialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="submitForm">确定</el-button>
+          </span>
+        </template>
+      </el-dialog>
+  
+      <!-- 删除确认对话框 -->
+      <el-dialog
+        title="确认删除"
+        v-model="deleteDialogVisible"
+        width="30%">
+        <p>确定要删除采样点 "{{ deleteItem?.sampleLocation || '' }}" 的数据吗？</p>
+        <template #footer>
+          <span>
+            <el-button @click="deleteDialogVisible = false">取消</el-button>
+            <el-button type="danger" @click="confirmDelete">确定删除</el-button>
+          </span>
+        </template>
+      </el-dialog>
+    </div>
+</template>
+  
+<script lang="ts" setup>
+    import { ref, onMounted, watch, computed, nextTick, reactive } from 'vue';
+    import { useRoute, useRouter } from 'vue-router';
+    import axios from 'axios';
+    import { ElMessage, ElMessageBox } from 'element-plus';
+    import type { FormInstance } from 'element-plus';
+
+    // 初始化路由和引用
+    const route = useRoute();
+    const router = useRouter();
+    const loading = ref(true);
+    const sampleForm = ref<FormInstance>();
+
+    // 筛选条件状态
+    const selectedCountryFilter = ref('');
+    const selectedlocationDetailFilter = ref('');
+    const selectedToxinTypeFilter = ref('');
+    const dateRangeFilter = ref<[string, string] | null>(null);
+
+    // 对话框状态
+    const dialogVisible = ref(false);
+    const deleteDialogVisible = ref(false);
+    const dialogType = ref<'add' | 'edit'>('add');
+    const deleteItem = ref<SampleInfoItem | null>(null);
+
+    // API基础配置
+    axios.defaults.baseURL = 'http://localhost:8080';
+    const englishTitle = ref<string>(route.query.englishTitle as string || '');
+
+    // 样品数据接口定义
+    interface SampleInfoItem {
+    id?: number;                       // 添加ID字段用于编辑和删除
+    toxinType: string;                // 藻毒素类型
+    samplingDate: string | number | Date; // 采样日期
+    concentration: number;           // 浓度
+    sampleCategory: number;          // 样品类别（1=水样，2=底泥）
+    waterType: number;               // 水体类型（1=淡水，2=海水）
+    freshwaterSubtype?: number;      // 淡水亚类型
+    seawaterSubtype?: number;        // 海水亚类型
+    otherType?: string;              // 其他类型
+    sampleLocation: string;          // 采样地点
+    latitude: number;                // 纬度
+    longitude: number;               // 经度
+    continent?: string;              // 大洲
+    country?: string;                // 国家
+    countryCode?: string;            // 国家代码
+    province?: string;               // 省份
+    city?: string;                   // 城市
+    county?: string;                 // 区县
+    detectionMethod?: string;        // 检测方法
+    hasOtherToxinEval: boolean;      // 是否有其他评估标准
+    otherEvalStandard?: string;      // 其他评估标准
+    englishTitle: string;            // 英文标题
+    [key: string]: any;              // 索引签名，允许其他属性
+    }
+
+    // 数据存储
+    const sampleInfoData = ref<SampleInfoItem[]>([]);  // 样品数据
+    const currentPage = ref(1);   // 当前页码
+    const pageSize = ref(5);     // 每页显示条数
+
+    // 表单数据和验证规则
+    const defaultFormData = (): SampleInfoItem => ({
+    toxinType: '',
+    samplingDate: '',
+    concentration: 0,
+    sampleCategory: 1,
+    waterType: 1,
+    freshwaterSubtype: 1,
+    sampleLocation: '',
+    latitude: 0,
+    longitude: 0,
+    continent: '',
+    country: '',
+    detectionMethod: '',
+    hasOtherToxinEval: false,
+    englishTitle: englishTitle.value
+    });
+
+    const formData = ref<SampleInfoItem>(defaultFormData());
+
+    const formRules = {
+    sampleLocation: [{ required: true, message: '请输入采样地点', trigger: 'blur' }],
+    samplingDate: [{ required: true, message: '请选择采样日期', trigger: 'change' }],
+    toxinType: [{ required: true, message: '请输入藻毒素种类', trigger: 'blur' }],
+    latitude: [{ required: true, message: '请输入纬度', trigger: 'blur' }],
+    longitude: [{ required: true, message: '请输入经度', trigger: 'blur' }],
+    country: [{ required: true, message: '请输入国家', trigger: 'blur' }]
+    };
+
+    // 计算属性：获取唯一国家列表
+    const uniqueCountry = computed(() => {
+    const set = new Set<string>();
+    sampleInfoData.value.forEach(i => { if (i.country) set.add(i.country); });
+    return Array.from(set).sort();
+    });
+
+    // 计算属性：获取唯一采样地点列表
+    const uniquelocationDetail = computed(() => {
+    const set = new Set<string>();
+    sampleInfoData.value.forEach(i => { if (i.sampleLocation) set.add(i.sampleLocation); });
+    return Array.from(set).sort();
+    });
+
+    // 计算属性：获取唯一藻毒素类型列表
+    const uniqueToxinTypes = computed(() => {
+    const set = new Set<string>();
+    sampleInfoData.value.forEach(i => { if (i.toxinType) set.add(i.toxinType); });
+    return Array.from(set).sort();
+    });
+
+    // 计算属性：根据筛选条件过滤数据
+    const filteredData = computed(() => {
+    let data = [...sampleInfoData.value];
+    
+    // 按国家筛选
+    if (selectedCountryFilter.value) {
+        data = data.filter(i => i.country === selectedCountryFilter.value);
+    }
+    
+    // 按采样地点筛选
+    if (selectedlocationDetailFilter.value) {
+        data = data.filter(i => i.sampleLocation === selectedlocationDetailFilter.value);
+    }
+    
+    // 按藻毒素类型筛选
+    if (selectedToxinTypeFilter.value) {
+        data = data.filter(i => i.toxinType === selectedToxinTypeFilter.value);
+    }
+    
+    // 按日期范围筛选
+    if (dateRangeFilter.value?.length === 2) {
+        const [s, e] = dateRangeFilter.value;
+        const sd = new Date(s), ed = new Date(e);
+        data = data.filter(i => {
+        const d = new Date(i.samplingDate);
+        return d >= sd && d <= ed;
+        });
+    }
+    
+    return data;
+    });
+
+    // 计算属性：获取分页后的当前页数据
+    const paginatedData = computed(() => {
+    const start = (currentPage.value - 1) * pageSize.value;
+    return filteredData.value.slice(start, start + pageSize.value);
+    });
+
+    // 分页处理函数
+    const handleCurrentChange = (p: number) => { currentPage.value = p; };
+    const handleSizeChange = (s: number) => { pageSize.value = s; currentPage.value = 1; };
+
+    // 筛选条件变更处理函数
+    const onCountryFilterChange = () => { currentPage.value = 1; };
+    const onlocationDetailFilterChange = () => { currentPage.value = 1; };
+    const onToxinFilterChange = (toxinType?: string) => { 
+    if (toxinType !== undefined) {
+        selectedToxinTypeFilter.value = toxinType;
+    }
+    currentPage.value = 1; 
+    };
+    const onDateRangeChange = () => { currentPage.value = 1; };
+
+    // 日期格式化函数
+    function formatDate(val: any): string {
+    if (!val) return '无数据';
+    const d = new Date(val);
+    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+    }
+
+    // 打开添加样品对话框
+    const showAddDialog = () => {
+    dialogType.value = 'add';
+    formData.value = defaultFormData();
+    dialogVisible.value = true;
+    };
+
+    // 打开编辑样品对话框
+    const handleEdit = (row: SampleInfoItem) => {
+    dialogType.value = 'edit';
+    formData.value = JSON.parse(JSON.stringify(row)); // 深拷贝防止直接修改表格数据
+    dialogVisible.value = true;
+    };
+
+    // 打开删除确认对话框
+    const handleDelete = (row: SampleInfoItem) => {
+    deleteItem.value = row;
+    deleteDialogVisible.value = true;
+    };
+
+    // 提交表单（添加或编辑）
+    const submitForm = async () => {
+    if (!sampleForm.value) return;
+    
+    await sampleForm.value.validate(async (valid) => {
+        if (valid) {
+        try {
+            loading.value = true;
+            
+            if (dialogType.value === 'add') {
+            // 添加新样品
+            const res = await axios.post('/sampleInfo/add', formData.value);
+            ElMessage.success('添加成功');
+            dialogVisible.value = false;
+            } else {
+            // 更新样品信息
+            const res = await axios.put('/sampleInfo/update', formData.value);
+            ElMessage.success('更新成功');
+            dialogVisible.value = false;
+            }
+            
+            // 刷新数据
+            await fetchSampleInfoByTitle();
+        } catch (error) {
+            console.error('操作失败:', error);
+            ElMessage.error('操作失败，请稍后重试');
+        } finally {
+            loading.value = false;
+        }
+        } else {
+        ElMessage.warning('请填写必填项');
+        return false;
+        }
+    });
+    };
+
+    // 确认删除
+    const confirmDelete = async () => {
+    if (!deleteItem.value || !deleteItem.value.id) {
+        ElMessage.error('无效的删除项');
+        return;
+    }
+    
+    try {
+        loading.value = true;
+        await axios.delete(`/sampleInfo/delete/${deleteItem.value.id}`);
+        ElMessage.success('删除成功');
+        deleteDialogVisible.value = false;
+        deleteItem.value = null;
+        
+        // 刷新数据
+        await fetchSampleInfoByTitle();
+    } catch (error) {
+        console.error('删除失败:', error);
+        ElMessage.error('删除失败，请稍后重试');
+    } finally {
+        loading.value = false;
+    }
+    };
+
+    // 数据获取函数 - 根据标题获取样品信息
+    const fetchSampleInfoByTitle = async () => {
+        loading.value = true;
+        try {
+        const res = await axios.get('/sampleInfo/byTitle', { params: { englishTitle: englishTitle.value } });
+        sampleInfoData.value = res.data;
+        currentPage.value = 1;
+        } catch (e) {
+        console.error('获取采样信息失败:', e);
+        } finally {
+        loading.value = false;
+        }
+    };
+
+    // 监听路由参数变化，重新获取数据
+    watch(() => route.query.englishTitle, async (newTitle) => {
+    if (newTitle) {
+        englishTitle.value = newTitle as string;
+        await fetchSampleInfoByTitle();
+    }
+    }, { immediate: true });
+
+    // 组件挂载时获取数据
+    onMounted(async () => {
+    await fetchSampleInfoByTitle();
+    });
+
+    // 导出供模板使用的变量和函数
+    defineExpose({
+    loading,
+    sampleForm,
+    selectedCountryFilter,
+    selectedlocationDetailFilter,
+    selectedToxinTypeFilter,
+    dateRangeFilter,
+    dialogVisible,
+    deleteDialogVisible,
+    dialogType,
+    deleteItem,
+    englishTitle,
+    sampleInfoData,
+    currentPage,
+    pageSize,
+    formData,
+    formRules,
+    uniqueCountry,
+    uniquelocationDetail,
+    uniqueToxinTypes,
+    filteredData,
+    paginatedData,
+    handleCurrentChange,
+    handleSizeChange,
+    onCountryFilterChange,
+    onlocationDetailFilterChange,
+    onToxinFilterChange,
+    onDateRangeChange,
+    formatDate,
+    showAddDialog,
+    handleEdit,
+    handleDelete,
+    submitForm,
+    confirmDelete,
+    fetchSampleInfoByTitle,
+    router
+    });
+</script>
+  
+<style>
+  :root {
+    --primary-color: #1989fa;
+    --primary-light: #ecf5ff;
+    --success-color: #67c23a;
+    --warning-color: #e6a23c;
+    --danger-color: #f56c6c;
+    --info-color: #909399;
+    --text-primary: #303133;
+    --text-regular: #606266;
+    --text-secondary: #909399;
+    --border-color: #dcdfe6;
+    --bg-color: #f5f7fa;
+  }
+
+  /* 全局样式 */
+  .detail-browse-container {
+    padding: 30px;
+    max-width: 1400px;
+    margin: 0 auto;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    background-color: #f0f2f5;
+    min-height: 100vh;
+  }
+
+  /* 页面标题部分 */
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid var(--primary-color);
+    background-color: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  }
+
+  .header-title {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+  }
+
+  .page-header h2 {
+    margin: 0;
+    color: var(--primary-color);
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  /* 添加按钮样式 */
+  .page-header .el-button {
+    padding: 12px 24px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+  }
+
+  .page-header .el-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(25, 137, 250, 0.2);
+  }
+
+  /* 筛选工具栏 */
+  .filter-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 25px;
+    padding: 20px;
+    background: linear-gradient(to right, #ffffff, #f9fbff);
+    border-radius: 12px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+    justify-content: flex-start;
+    align-items: center;
+    border-left: 4px solid var(--primary-color);
+  }
+
+  .filter-item {
+    flex: 1;
+    min-width: 200px;
+    max-width: 320px;
+  }
+
+  /* 内容区域 */
+  .content-wrapper {
+    position: relative;
+    margin-bottom: 40px;
+  }
+
+  /* 表格卡片 */
+  .table-card {
+    margin-bottom: 30px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+    background-color: #fff;
+    overflow: hidden;
+  }
+
+  .table-card:hover {
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+  }
+
+  /* 加载状态 */
+  .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    border-radius: 12px;
+    backdrop-filter: blur(4px);
+  }
+
+  /* 分页容器 */
+  .pagination-container {
+    margin-top: 25px;
+    display: flex;
+    justify-content: center;
+    padding: 15px;
+    background-color: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  }
+
+  /* 无数据状态 */
+  .no-data {
+    text-align: center;
+    padding: 80px 0;
+    background-color: white;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  }
+
+  .no-data .el-button {
+    margin-top: 20px;
+    padding: 12px 24px;
+    font-weight: 600;
+  }
+
+  /* 藻毒素信息样式 */
+  .toxin-info {
+    padding: 15px;
+    background-color: #f9fbff;
+    border-radius: 10px;
+    border-left: 3px solid var(--primary-color);
+    transition: all 0.3s ease;
+  }
+
+  .toxin-info:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    transform: translateY(-2px);
+  }
+
+  .toxin-type {
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--primary-color);
+  }
+
+  .toxin-details {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--text-regular);
+    line-height: 1.6;
+  }
+
+  .toxin-concentration .concentration-value {
+    font-weight: 600;
+    color: var(--primary-color);
+    background-color: rgba(25, 137, 250, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  /* 地理位置信息 */
+  .location-info {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    padding: 15px;
+    background-color: #f9fbff;
+    border-radius: 10px;
+    border-left: 3px solid var(--info-color);
+    transition: all 0.3s ease;
+  }
+
+  .location-info:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    transform: translateY(-2px);
+  }
+
+  .coordinate {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .coordinate-value {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    color: var(--text-regular);
+    background-color: rgba(144, 147, 153, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .administrative {
+    font-size: 14px;
+    color: var(--text-regular);
+  }
+
+  /* 水体类型信息 */
+  .water-type {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-regular);
+  }
+
+  .water-type i {
+    color: var(--primary-color);
+  }
+
+  .date-column {
+    font-family: 'Courier New', monospace;
+    color: var(--text-regular);
+  }
+
+  /* 淡入淡出转场效果 */
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: opacity 0.3s ease;
+  }
+
+  .fade-enter-from,
+  .fade-leave-to {
+    opacity: 0;
+  }
+
+  /* 响应式表格 */
+  @media (max-width: 768px) {
+    .detail-browse-container {
+      padding: 15px;
+    }
+    
+    .page-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    
+    .page-header .el-button {
+      margin-top: 15px;
+      width: 100%;
+    }
+    
+    .filter-toolbar {
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .filter-item {
+      min-width: 100%;
+    }
+  }
+
+  /* 操作按钮容器样式 */
+  .action-buttons {
+    display: flex;
+    gap: 8px;  /* 按钮之间的间距 */
+    justify-content: center;
+  }
+
+   /* 操作按钮样式 */
+  .action-buttons .el-button {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+  }
+
+    /* 编辑按钮特殊样式 */
+    .action-buttons .el-button--primary {
+    background-color: #ecf5ff;
+    color: var(--primary-color);
+    border-color: #d9ecff;
+    }
+
+    .action-buttons .el-button--primary:hover {
+    background-color: var(--primary-color);
+    color: white;
+    }
+
+    /* 删除按钮特殊样式 */
+    .action-buttons .el-button--danger {
+    background-color: #fef0f0;
+    color: var(--danger-color);
+    border-color: #fde2e2;
+    }
+
+    .action-buttons .el-button--danger:hover {
+    background-color: var(--danger-color);
+    color: white;
+    }
+
+    /* 让操作列内容居中 */
+    :deep(.el-table .operation-column) {
+    text-align: center;
+    }
+
+  /* 表格行悬停效果 */
+  :deep(.el-table__row:hover) {
+    background-color: var(--primary-light) !important;
+  }
+
+  /* 表格头部样式 */
+  :deep(.el-table__header) {
+    background-color: #f0f7ff;
+  }
+
+  /* 表头样式优化 */
+  :deep(.el-table__header-row th) {
+    background-color: #f0f7ff !important;
+    color: var(--primary-color) !important;
+    font-weight: 600 !important;
+    padding: 16px 0 !important;
+    border-bottom: 2px solid #d9ecff;  /* 加粗的底部边框 */
+  }
+
+  /* 分页样式 */
+  :deep(.el-pagination) {
+    padding: 15px 0;
+    font-weight: 600;
+  }
+
+  :deep(.el-pagination .el-pagination__total) {
+    color: var(--text-regular);
+  }
+
+  :deep(.el-pagination .el-pager li.active) {
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 600;
+  }
+
+  /* 标签样式 */
+  :deep(.el-tag) {
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  /* 按钮转场效果 */
+  :deep(.el-button) {
+    transition: all 0.3s ease;
+    border-radius: 6px;
+    font-weight: 500;
+  }
+
+  :deep(.el-button:hover) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  /* 表单对话框样式 */
+  :deep(.el-dialog) {
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  }
+
+  :deep(.el-dialog__header) {
+    padding: 20px;
+    background-color: var(--primary-color);
+    color: white;
+  }
+
+  :deep(.el-dialog__title) {
+    color: white;
+    font-weight: 600;
+    font-size: 18px;
+  }
+
+  :deep(.el-dialog__body) {
+    padding: 30px;
+  }
+
+  :deep(.el-dialog__footer) {
+    padding: 15px 20px;
+    border-top: 1px solid var(--border-color);
+  }
+
+  /* 分割线样式 */
+  :deep(.el-divider__text) {
+    background-color: #fff;
+    color: var(--primary-color);
+    font-weight: 600;
+    padding: 0 15px;
+  }
+
+  /* 表单项样式 */
+  :deep(.el-form-item__label) {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  :deep(.el-input__inner) {
+    border-radius: 6px;
+  }
+
+  /* 水样和底泥标签样式 */
+  :deep(.el-tag--success) {
+    background-color: rgba(103, 194, 58, 0.1);
+    border-color: var(--success-color);
+    color: var(--success-color);
+  }
+
+  :deep(.el-tag--warning) {
+    background-color: rgba(230, 162, 60, 0.1);
+    border-color: var(--warning-color);
+    color: var(--warning-color);
+  }
+
+  /* 水体属性标签样式 */
+  :deep(.el-tag--primary) {
+    background-color: rgba(25, 137, 250, 0.1);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+  }
+
+  :deep(.el-tag--info) {
+    background-color: rgba(144, 147, 153, 0.1);
+    border-color: var(--info-color);
+    color: var(--info-color);
+  }
+
+  /* 空数据样式 */
+  :deep(.el-empty__description) {
+    margin-top: 20px;
+    color: var(--text-secondary);
+    font-size: 16px;
+  }
+
+  :deep(.el-empty__image) {
+    width: 120px;
+    height: 120px;
+  }
+</style>
